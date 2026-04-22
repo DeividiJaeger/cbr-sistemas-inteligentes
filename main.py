@@ -362,12 +362,26 @@ def _build_kfold_splits(case_ids: list[str], folds: int) -> list[list[str]]:
 	return splits
 
 
+def _validate_kfold_splits(case_ids: list[str], fold_splits: list[list[str]]) -> None:
+	"""Valida integridade dos folds para evitar vazamento e perdas de casos."""
+	flattened = [case_id for fold in fold_splits for case_id in fold]
+
+	if len(flattened) != len(case_ids):
+		raise ValueError("K-Fold invalido: quantidade de casos em folds difere do total.")
+
+	if len(set(flattened)) != len(flattened):
+		raise ValueError("K-Fold invalido: ha casos repetidos em mais de um fold.")
+
+	if set(flattened) != set(case_ids):
+		raise ValueError("K-Fold invalido: alguns casos nao foram alocados aos folds.")
+
+
 def validate_kfold(
 	full_casebase: dict[str, dict[str, Any]],
 	k: int,
 	folds: int,
 	seed: int,
-) -> tuple[dict[str, float], list[dict[str, float]]]:
+) -> tuple[dict[str, float], list[dict[str, Any]]]:
 	"""Executa validacao K-Fold e retorna metricas por fold e agregadas.
 
 	Fluxo:
@@ -379,9 +393,10 @@ def validate_kfold(
 	rng = random.Random(seed)
 	rng.shuffle(case_ids)
 	fold_splits = _build_kfold_splits(case_ids, folds)
+	_validate_kfold_splits(case_ids, fold_splits)
 
 	all_pairs: list[tuple[dict[str, Any], dict[str, Any], float]] = []
-	fold_metrics: list[dict[str, float]] = []
+	fold_metrics: list[dict[str, Any]] = []
 
 	for fold_index, test_ids in enumerate(fold_splits, start=1):
 		test_set = set(test_ids)
@@ -409,7 +424,9 @@ def validate_kfold(
 			fold_pairs.append((query_case["solution"], predicted_solution, top1_similarity))
 
 		fold_result = _evaluate_predictions(fold_pairs)
-		fold_result["fold"] = float(fold_index)
+		fold_result["fold"] = fold_index
+		fold_result["test_cases"] = len(test_ids)
+		fold_result["train_cases"] = len(training_casebase)
 		fold_metrics.append(fold_result)
 		all_pairs.extend(fold_pairs)
 
@@ -433,7 +450,7 @@ def run_validation(
 		if folds > total_cases:
 			raise ValueError(f"--folds nao pode ser maior que o numero de casos ({total_cases}).")
 
-		print(f"=== Validacao K-Fold (k={folds}) ===")
+		print(f"=== Validacao K-Fold (k={k}, folds={folds}) ===")
 		overall_metrics, fold_metrics = validate_kfold(
 			full_casebase=full_casebase,
 			k=k,
